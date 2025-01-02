@@ -1,0 +1,84 @@
+class Block {
+    [string]$Timestamp
+    [hashtable]$Data
+    [string]$PreviousHash
+    [int]$Nonce
+    [string]$Hash
+
+    Block ([string]$timestamp, [hashtable]$data, [string]$previousHash = "") {
+        $this.Timestamp = $timestamp
+        $this.Data = $data
+        $this.PreviousHash = $previousHash
+        $this.Nonce = 0
+        $this.Hash = $this.Calculate_Hash()
+    }
+
+    [string]Calculate_Hash() {
+        $blockString = $this.PreviousHash + $this.Timestamp + (ConvertTo-Json $this.Data -Depth 10) + $this.Nonce
+        return [System.BitConverter]::ToString((New-Object Security.Cryptography.SHA256Managed).ComputeHash([System.Text.Encoding]::UTF8.GetBytes($blockString))).Replace("-", "").ToLower()
+    }
+
+    [void]Mine_Block([int]$difficulty) {
+        $target = "0" * $difficulty
+        $startTime = Get-Date
+
+        while (-not $this.Hash.StartsWith($target)) {
+            $this.Nonce++
+            $this.Hash = $this.Calculate_Hash()
+        }
+
+        $elapsedTime = (Get-Date) - $startTime
+        Write-Host "Block mined: $($this.Hash), Nonce: $($this.Nonce), Time: $($elapsedTime.TotalSeconds) seconds" -ForegroundColor Green
+    }
+}
+
+# Tạo hàm tạo thủ công
+function New-Block {
+    param (
+        [string]$Timestamp,
+        [hashtable]$Data,
+        [string]$PreviousHash = ""
+    )
+    return [Block]::new($Timestamp, $Data, $PreviousHash)
+}
+
+# Hàm để chạy đào block trên nhiều CPU
+function Start-Mining {
+    param (
+        [int]$Difficulty = 3
+    )
+
+    # Xác định số lõi CPU
+    $cpuCount = [Environment]::ProcessorCount
+    Write-Host "Số lượng CPU: $cpuCount. Bắt đầu khai thác..." -ForegroundColor Yellow
+
+    # Tạo danh sách runspace để chạy đa luồng
+    $runspaces = @()
+    for ($i = 1; $i -le $cpuCount; $i++) {
+        $runspace = [powershell]::Create().AddScript({
+            param ($id, $difficulty)
+            while ($true) {
+                # Tạo block mới và đào
+                $block = New-Block -Timestamp (Get-Date -Format "dd/MM/yyyy HH:mm:ss") -Data @{"Worker" = "CPU-$id"; "Reward" = 50}
+                $block.Mine_Block($difficulty)
+            }
+        }).AddArgument($i).AddArgument($Difficulty)
+
+        # Bắt đầu luồng
+        $runspace.RunspacePool = [RunspaceFactory]::CreateRunspacePool(1, $cpuCount)
+        $runspace.RunspacePool.Open()
+        $runspaces += $runspace
+        $runspace.BeginInvoke()
+    }
+
+    # Thông báo người dùng dừng chương trình
+    Write-Host "Nhấn Ctrl+C để dừng chương trình." -ForegroundColor Yellow
+
+    # Giữ chương trình chạy liên tục
+    while ($true) {
+        Start-Sleep -Seconds 1
+    }
+}
+
+# Chạy hàm
+Start-Mining -Difficulty 3
